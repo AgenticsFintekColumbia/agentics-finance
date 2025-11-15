@@ -2,8 +2,7 @@
 Financial Analyst Agent Configuration
 """
 
-from agentics import AG
-from crewai import Agent, Task, Crew
+from crewai import Agent, Task, Crew, LLM
 from tools import (
     DateRangeQueryTool,
     IndicatorStatsTool,
@@ -95,8 +94,19 @@ def create_financial_analyst_agent(enabled_tool_categories=None):
         Agent: Configured CrewAI agent
     """
 
-    # Initialize LLM
-    llm = AG.get_llm_provider()
+    # Initialize LLM from environment variables
+    # CrewAI's LLM class will automatically pick up GEMINI_API_KEY and GEMINI_MODEL_ID
+    selected_llm = os.getenv("SELECTED_LLM", "gemini")
+
+    if selected_llm == "gemini":
+        model_id = os.getenv("GEMINI_MODEL_ID", "gemini/gemini-2.0-flash-exp")
+    elif selected_llm == "openai":
+        model_id = os.getenv("OPENAI_MODEL_ID", "gpt-4")
+    else:
+        # Default to gemini
+        model_id = os.getenv("GEMINI_MODEL_ID", "gemini/gemini-2.0-flash-exp")
+
+    llm = LLM(model=model_id)
 
     # Organize tools by category
     all_tools = {

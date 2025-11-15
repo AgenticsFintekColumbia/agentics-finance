@@ -34,13 +34,12 @@ pip install --upgrade pip > /dev/null 2>&1
 echo "✓ pip upgraded"
 echo ""
 
-# Install requirements (includes Agentics framework)
+# Install requirements
 echo "Installing dependencies (this may take a few minutes)..."
-echo "Note: This includes the Agentics framework from the local directory"
 pip install -r requirements.txt
 
 if [ $? -eq 0 ]; then
-    echo "✓ Dependencies installed successfully (including Agentics)"
+    echo "✓ Dependencies installed successfully"
 else
     echo "✗ Error installing dependencies"
     exit 1

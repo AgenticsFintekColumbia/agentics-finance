@@ -110,6 +110,39 @@ if "enabled_tool_categories" not in st.session_state:
     # Enable all categories by default
     st.session_state.enabled_tool_categories = list(get_tool_categories().keys())
 
+# Configuration: Maximum number of messages to keep in history
+# Prevents context overflow and memory issues in long conversations
+# Each exchange = 1 user message + 1 assistant message = 2 messages
+MAX_MESSAGES = 10  # Keep last 10 exchanges (increase if needed, but may cause agent failures)
+
+
+def truncate_conversation_history():
+    """
+    Truncate conversation history to prevent context overflow and memory issues.
+    Keeps only the most recent messages to maintain performance.
+    """
+    if len(st.session_state.messages) > MAX_MESSAGES:
+        # Keep only the most recent messages
+        messages_to_remove = st.session_state.messages[:-MAX_MESSAGES]
+        st.session_state.messages = st.session_state.messages[-MAX_MESSAGES:]
+
+        # Clean up visualizations from removed messages
+        removed_viz_ids = set()
+        for msg in messages_to_remove:
+            if "visualizations" in msg and msg["visualizations"]:
+                removed_viz_ids.update(msg["visualizations"])
+
+        # Delete visualization files for removed messages
+        if removed_viz_ids:
+            viz_dir = os.path.join(os.path.dirname(__file__), "visualizations")
+            for viz_id in removed_viz_ids:
+                viz_file = os.path.join(viz_dir, f"{viz_id}.json")
+                try:
+                    if os.path.exists(viz_file):
+                        os.remove(viz_file)
+                except:
+                    pass
+
 
 def clean_old_visualizations():
     """Remove visualization files that are no longer referenced in conversation history."""
@@ -158,44 +191,45 @@ def load_visualization(viz_id: str):
 
         viz_type = viz_config.get("type")
 
+        # Pass viz_id to rendering functions for unique keys
         if viz_type == "time_series":
-            render_time_series(viz_config)
+            render_time_series(viz_config, viz_id)
         elif viz_type == "correlation_heatmap":
-            render_correlation_heatmap(viz_config)
+            render_correlation_heatmap(viz_config, viz_id)
         elif viz_type == "volatility_plot":
-            render_volatility_plot(viz_config)
+            render_volatility_plot(viz_config, viz_id)
         elif viz_type == "distribution":
-            render_distribution(viz_config)
+            render_distribution(viz_config, viz_id)
         elif viz_type == "scatter":
-            render_scatter(viz_config)
+            render_scatter(viz_config, viz_id)
         elif viz_type == "comparative_performance":
-            render_comparative_performance(viz_config)
+            render_comparative_performance(viz_config, viz_id)
         elif viz_type == "moving_average":
-            render_moving_average(viz_config)
+            render_moving_average(viz_config, viz_id)
         elif viz_type == "drawdown":
-            render_drawdown(viz_config)
+            render_drawdown(viz_config, viz_id)
         elif viz_type == "multi_indicator":
-            render_multi_indicator(viz_config)
+            render_multi_indicator(viz_config, viz_id)
         elif viz_type == "company_comparison":
-            render_company_comparison(viz_config)
+            render_company_comparison(viz_config, viz_id)
         elif viz_type == "fundamental_time_series":
-            render_fundamental_time_series(viz_config)
+            render_fundamental_time_series(viz_config, viz_id)
         elif viz_type == "valuation_scatter":
-            render_valuation_scatter(viz_config)
+            render_valuation_scatter(viz_config, viz_id)
         elif viz_type == "portfolio_recommendation":
-            render_portfolio_recommendation(viz_config)
+            render_portfolio_recommendation(viz_config, viz_id)
         elif viz_type == "price_chart":
-            render_price_chart(viz_config)
+            render_price_chart(viz_config, viz_id)
         elif viz_type == "performance_comparison":
-            render_performance_comparison(viz_config)
+            render_performance_comparison(viz_config, viz_id)
         elif viz_type == "volatility_chart":
-            render_volatility_chart(viz_config)
+            render_volatility_chart(viz_config, viz_id)
         elif viz_type == "volatility_portfolio":
-            render_volatility_portfolio(viz_config)
+            render_volatility_portfolio(viz_config, viz_id)
         elif viz_type == "momentum_portfolio":
-            render_momentum_portfolio(viz_config)
+            render_momentum_portfolio(viz_config, viz_id)
         elif viz_type == "sector_portfolio":
-            render_sector_portfolio(viz_config)
+            render_sector_portfolio(viz_config, viz_id)
         else:
             st.warning(f"Unknown visualization type: {viz_type}")
     except Exception as e:
@@ -204,7 +238,7 @@ def load_visualization(viz_id: str):
         st.code(traceback.format_exc())
 
 
-def render_time_series(config: dict):
+def render_time_series(config: dict, viz_id: str = None):
     """Render time series plot with support for dual y-axes when scales differ significantly."""
     df = pd.DataFrame(config["data"])
     indicators = config.get("indicators", df["indicator"].unique().tolist())
@@ -277,10 +311,10 @@ def render_time_series(config: dict):
             height=500
         )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_time_series" if viz_id else None)
 
 
-def render_correlation_heatmap(config: dict):
+def render_correlation_heatmap(config: dict, viz_id: str = None):
     """Render correlation heatmap."""
     df = pd.DataFrame(config["data"])
 
@@ -306,10 +340,10 @@ def render_correlation_heatmap(config: dict):
         height=600
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_heatmap" if viz_id else None)
 
 
-def render_volatility_plot(config: dict):
+def render_volatility_plot(config: dict, viz_id: str = None):
     """Render volatility plot with dual y-axes."""
     df = pd.DataFrame(config["data"])
 
@@ -350,10 +384,10 @@ def render_volatility_plot(config: dict):
         height=500
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_volatility" if viz_id else None)
 
 
-def render_distribution(config: dict):
+def render_distribution(config: dict, viz_id: str = None):
     """Render distribution histogram."""
     fig = go.Figure()
 
@@ -381,10 +415,10 @@ def render_distribution(config: dict):
         height=400
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_distribution" if viz_id else None)
 
 
-def render_scatter(config: dict):
+def render_scatter(config: dict, viz_id: str = None):
     """Render scatter plot."""
     df = pd.DataFrame(config["data"])
 
@@ -413,10 +447,10 @@ def render_scatter(config: dict):
     )
 
     fig.update_layout(height=500)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_scatter" if viz_id else None)
 
 
-def render_comparative_performance(config: dict):
+def render_comparative_performance(config: dict, viz_id: str = None):
     """Render comparative performance chart (normalized to 100)."""
     df = pd.DataFrame(config["data"])
 
@@ -438,10 +472,10 @@ def render_comparative_performance(config: dict):
         height=500
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_comparative" if viz_id else None)
 
 
-def render_moving_average(config: dict):
+def render_moving_average(config: dict, viz_id: str = None):
     """Render moving average chart."""
     df = pd.DataFrame(config["data"])
 
@@ -476,10 +510,10 @@ def render_moving_average(config: dict):
         height=500
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_moving_avg" if viz_id else None)
 
 
-def render_drawdown(config: dict):
+def render_drawdown(config: dict, viz_id: str = None):
     """Render drawdown chart."""
     df = pd.DataFrame(config["data"])
 
@@ -529,10 +563,10 @@ def render_drawdown(config: dict):
         showlegend=False
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_drawdown" if viz_id else None)
 
 
-def render_multi_indicator(config: dict):
+def render_multi_indicator(config: dict, viz_id: str = None):
     """Render multi-indicator dashboard with subplots."""
     indicators = config["indicators"]
     data = config["data"]
@@ -574,10 +608,10 @@ def render_multi_indicator(config: dict):
         height=250 * len(indicators)
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_multi_indicator" if viz_id else None)
 
 
-def render_company_comparison(config: dict):
+def render_company_comparison(config: dict, viz_id: str = None):
     """Render company comparison bar chart."""
     data = config["data"]
     metrics = config["metrics"]
@@ -625,10 +659,10 @@ def render_company_comparison(config: dict):
         showlegend=False
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_company_comp" if viz_id else None)
 
 
-def render_fundamental_time_series(config: dict):
+def render_fundamental_time_series(config: dict, viz_id: str = None):
     """Render fundamental time series plot."""
     df = pd.DataFrame(config["data"])
     metrics = config["metrics"]
@@ -690,10 +724,10 @@ def render_fundamental_time_series(config: dict):
         height=500
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_fundamental_ts" if viz_id else None)
 
 
-def render_valuation_scatter(config: dict):
+def render_valuation_scatter(config: dict, viz_id: str = None):
     """Render valuation scatter plot."""
     df = pd.DataFrame(config["data"])
 
@@ -729,10 +763,10 @@ def render_valuation_scatter(config: dict):
         )
 
     fig.update_layout(height=500)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_valuation" if viz_id else None)
 
 
-def render_portfolio_recommendation(config: dict):
+def render_portfolio_recommendation(config: dict, viz_id: str = None):
     """Render portfolio recommendation chart."""
     long_positions = config["long_positions"]
     short_positions = config["short_positions"]
@@ -870,10 +904,10 @@ def render_portfolio_recommendation(config: dict):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_portfolio" if viz_id else None)
 
 
-def render_price_chart(config: dict):
+def render_price_chart(config: dict, viz_id: str = None):
     """Render DJ30 price chart (candlestick, line, or OHLC)."""
     df = pd.DataFrame(config["data"])
     df['date'] = pd.to_datetime(df['date'])
@@ -936,10 +970,10 @@ def render_price_chart(config: dict):
         height=600
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_price" if viz_id else None)
 
 
-def render_performance_comparison(config: dict):
+def render_performance_comparison(config: dict, viz_id: str = None):
     """Render DJ30 performance comparison chart."""
     series = config["series"]
 
@@ -970,10 +1004,10 @@ def render_performance_comparison(config: dict):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_performance" if viz_id else None)
 
 
-def render_volatility_chart(config: dict):
+def render_volatility_chart(config: dict, viz_id: str = None):
     """Render DJ30 rolling volatility chart."""
     df = pd.DataFrame(config["data"])
     df['date'] = pd.to_datetime(df['date'])
@@ -997,10 +1031,10 @@ def render_volatility_chart(config: dict):
         height=500
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_vol_chart" if viz_id else None)
 
 
-def render_volatility_portfolio(config: dict):
+def render_volatility_portfolio(config: dict, viz_id: str = None):
     """Render volatility-based portfolio recommendations."""
     long_positions = config.get("long_positions", [])
     short_positions = config.get("short_positions", [])
@@ -1096,10 +1130,10 @@ def render_volatility_portfolio(config: dict):
         height=400
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_vol_portfolio" if viz_id else None)
 
 
-def render_momentum_portfolio(config: dict):
+def render_momentum_portfolio(config: dict, viz_id: str = None):
     """Render momentum-based portfolio recommendations."""
     long_positions = config.get("long_positions", [])
     short_positions = config.get("short_positions", [])
@@ -1187,10 +1221,10 @@ def render_momentum_portfolio(config: dict):
         height=400
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_momentum" if viz_id else None)
 
 
-def render_sector_portfolio(config: dict):
+def render_sector_portfolio(config: dict, viz_id: str = None):
     """Render sector-diversified portfolio."""
     positions = config["positions"]
 
@@ -1232,7 +1266,7 @@ def render_sector_portfolio(config: dict):
         height=400
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_sector" if viz_id else None)
 
 
 def run_analysis_with_logs(user_input: str, conversation_history: list, enabled_tool_categories: list = None) -> str:
@@ -1287,8 +1321,15 @@ def extract_visualization_ids(response: str) -> list:
     # First, try to extract from response text
     viz_ids = re.findall(r'viz_\d{8}_\d{6}_[a-f0-9]{8}', response)
 
+    # Get all visualization IDs already used in previous messages
+    existing_viz_ids = set()
+    for message in st.session_state.messages:
+        if "visualizations" in message and message["visualizations"]:
+            existing_viz_ids.update(message["visualizations"])
+
     # Fallback: Check for recently created visualization files (within last 30 seconds)
     # This handles cases where the agent doesn't include the exact ID text
+    # BUT exclude any visualizations already associated with previous messages
     viz_dir = os.path.join(os.path.dirname(__file__), "visualizations")
     if os.path.exists(viz_dir):
         now = datetime.now().timestamp()
@@ -1297,7 +1338,8 @@ def extract_visualization_ids(response: str) -> list:
             file_age = now - os.path.getmtime(viz_file)
             if file_age < 30:  # Created within last 30 seconds
                 viz_id = os.path.basename(viz_file).replace('.json', '')
-                if viz_id not in viz_ids:
+                # Only add if not already in response text AND not in previous messages
+                if viz_id not in viz_ids and viz_id not in existing_viz_ids:
                     recent_files.append(viz_id)
         viz_ids.extend(recent_files)
 
@@ -1402,6 +1444,16 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # Conversation status
+    num_messages = len(st.session_state.messages)
+    num_exchanges = num_messages // 2
+
+    if num_messages > 0:
+        if num_messages >= MAX_MESSAGES:
+            st.warning(f"⚠️ Conversation history at limit ({num_exchanges} exchanges). Older messages are being removed to maintain performance.")
+        else:
+            st.info(f"💬 Current conversation: {num_exchanges} exchanges ({num_messages} messages)")
+
     if st.button("🗑️ Clear Conversation"):
         st.session_state.messages = []
         st.session_state.current_visualizations = []
@@ -1473,7 +1525,7 @@ with st.sidebar:
         - Compare price performance of AAPL, MSFT, and GOOGL over the past year
         - What was the volatility of AAPL during 2020?
         - Analyze returns for MSFT from 2020 to 2023
-        - Create a volatility chart for NVDA showing rolling 30-day volatility
+        - Create a volatility chart for AAPL showing rolling 30-day volatility
         - What was the price range for JPM in 2022?
         """)
 
@@ -1556,6 +1608,9 @@ if submit_button and user_input:
         "content": user_input
     })
 
+    # Truncate conversation history to prevent context overflow
+    truncate_conversation_history()
+
     # Clean old visualizations from previous turn
     clean_old_visualizations()
     st.session_state.current_visualizations = []
@@ -1570,16 +1625,35 @@ if submit_button and user_input:
                 enabled_tool_categories=st.session_state.enabled_tool_categories
             )
 
-            # Extract visualization IDs from response
-            viz_ids = extract_visualization_ids(response)
-            st.session_state.current_visualizations = viz_ids
+            # Validate response - check for empty or incomplete responses
+            response_cleaned = response.strip() if response else ""
+            if not response_cleaned or response_cleaned in ["```", "``", "`"]:
+                error_msg = (
+                    "⚠️ The agent returned an incomplete response. This usually happens due to:\n"
+                    "1. Context overflow (try clearing conversation history)\n"
+                    "2. Tool output being too large\n"
+                    "3. LLM formatting confusion\n\n"
+                    "Please try:\n"
+                    "- Simplifying your question\n"
+                    "- Clearing conversation history\n"
+                    "- Asking again"
+                )
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": error_msg,
+                    "visualizations": []
+                })
+            else:
+                # Extract visualization IDs from response
+                viz_ids = extract_visualization_ids(response)
+                st.session_state.current_visualizations = viz_ids
 
-            # Add assistant message
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response,
-                "visualizations": viz_ids
-            })
+                # Add assistant message
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": response,
+                    "visualizations": viz_ids
+                })
 
         except Exception as e:
             st.error(f"Error during analysis: {str(e)}")

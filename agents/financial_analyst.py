@@ -206,27 +206,17 @@ def create_financial_analyst_agent(enabled_tool_categories=None):
             "and clear visualizations."
         ),
         backstory=(
-            "You are an expert financial analyst with deep knowledge of macroeconomics, "
-            "financial markets, equity analysis, and data science. You have access to comprehensive datasets: "
-            "1) Macroeconomic indicators (Fed Funds Rate, CPI, unemployment, retail sales, etc.) "
-            "2) Market factors (S&P 500, VIX, Bitcoin, gold, oil prices, Treasury yields, etc.) "
-            "3) Company fundamentals (61 publicly traded companies with EPS, ROE, ROA, P/E ratios, margins, etc.) "
-            "4) DJ30 stock price data (30 Dow Jones Industrial Average stocks with daily OHLCV data from 2008-2025) "
-            "All data spans from 2008 to present. "
-            "You excel at identifying trends, correlations, anomalies, and investment opportunities. "
-            "You can analyze company fundamentals, compare valuations, screen for opportunities, "
-            "and generate long/short portfolio recommendations based on fundamental strength, "
-            "macro context, and relative valuations. You also specialize in technical analysis, "
-            "price momentum strategies, volatility-based trading, and quantitative portfolio construction. "
-            "When users ask questions, you use your tools to query data, perform analysis, "
-            "and create visualizations to support your insights. You always provide context "
-            "and explain your findings in clear, accessible language."
+            "Expert financial analyst with access to macroeconomic indicators, market data, "
+            "company fundamentals, and DJ30 stock prices (2008-present). Skilled in statistical analysis, "
+            "correlation studies, portfolio optimization, and technical analysis. Use tools to query data "
+            "and create visualizations. Provide clear, data-driven insights."
         ),
         tools=tools,
         llm=llm,
         verbose=True,
         allow_delegation=False,
-        max_iter=15,
+        max_iter=10,  # Reduced to prevent context overflow
+        memory=False,  # Disable memory to reduce context size
     )
 
     return agent
@@ -313,15 +303,15 @@ def create_analysis_task(agent: Agent, user_question: str, conversation_history:
     Returns:
         Task: Configured CrewAI task
     """
-    # Build conversation context
+    # Build conversation context (limit to prevent context overflow)
     context = ""
     if conversation_history and len(conversation_history) > 0:
         context = "Previous Conversation:\n"
-        for msg in conversation_history[-6:]:  # Include last 3 exchanges (6 messages)
+        for msg in conversation_history[-4:]:  # Include last 2 exchanges only (4 messages)
             role = "User" if msg["role"] == "user" else "Assistant"
-            content = msg["content"][:500]  # Truncate long responses
-            context += f"{role}: {content}\n\n"
-        context += "---\n\n"
+            content = msg["content"][:300]  # Truncate to 300 chars
+            context += f"{role}: {content}...\n"
+        context += "---\n"
 
     # Generate dynamic tool instructions based on enabled categories
     tool_instructions = generate_tool_instructions(enabled_tool_categories)
@@ -329,28 +319,25 @@ def create_analysis_task(agent: Agent, user_question: str, conversation_history:
     task = Task(
         description=(
             f"{context}"
-            f"Current User Question: {user_question}\n\n"
+            f"Question: {user_question}\n\n"
+            f"{tool_instructions}\n"
             "Instructions:\n"
-            "1. Analyze the current question in the context of the conversation history\n"
-            "2. If the question refers to a previous topic (e.g., 'similar analysis', 'same indicator'), use that context\n"
-            f"3. Choose the right tools for the task (you have access to these categories: {', '.join(enabled_tool_categories) if enabled_tool_categories else 'all'}):\n"
-            f"{tool_instructions}"
-            "4. Provide a comprehensive, well-structured answer with:\n"
-            "   - Key findings and insights\n"
-            "   - Statistical evidence and data points\n"
-            "   - Context and interpretation\n"
-            "   - Any relevant visualizations created\n"
-            "5. Be specific with dates, values, and indicators/tickers\n"
-            "6. If you create visualizations, mention the visualization IDs in your response\n"
+            "1. Use appropriate tools to analyze the data\n"
+            "2. Write your response in plain text (DO NOT use code blocks or markdown formatting)\n"
+            "3. Include key findings with specific numbers and statistics\n"
+            "4. Reference any visualization IDs you created\n"
+            "5. Provide clear, accessible explanations\n"
         ),
         agent=agent,
         expected_output=(
-            "A comprehensive analysis that includes:\n"
-            "- Direct answer to the user's question\n"
-            "- Supporting data and statistics\n"
-            "- Context and interpretation\n"
-            "- References to any visualizations created (with their IDs)\n"
-            "- Clear, accessible explanations"
+            "A clear text analysis that includes:\n"
+            "- Direct answer to the question with specific data points\n"
+            "- Key statistics and findings\n"
+            "- Any visualization IDs created (e.g., 'Visualization ID: viz_...')\n"
+            "- Clear explanations\n"
+            "\n"
+            "IMPORTANT: Write in plain text. DO NOT use markdown code blocks (```). "
+            "DO NOT output just symbols or incomplete responses."
         )
     )
 

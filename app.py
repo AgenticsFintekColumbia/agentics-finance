@@ -15,7 +15,7 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from agents import run_analysis, get_tool_categories
+from agents import run_analysis, get_tool_categories, run_deep_research
 from utils import get_data_summary, get_column_descriptions, get_firm_data_summary, get_firm_column_descriptions, get_dj30_data_summary, get_dj30_column_descriptions
 
 # Page configuration
@@ -109,6 +109,9 @@ if "show_logs" not in st.session_state:
 if "enabled_tool_categories" not in st.session_state:
     # Enable all categories by default
     st.session_state.enabled_tool_categories = list(get_tool_categories().keys())
+
+if "deep_research_mode" not in st.session_state:
+    st.session_state.deep_research_mode = False
 
 # Configuration: Maximum number of messages to keep in history
 # Prevents context overflow and memory issues in long conversations
@@ -230,10 +233,40 @@ def load_visualization(viz_id: str):
             render_momentum_portfolio(viz_config, viz_id)
         elif viz_type == "sector_portfolio":
             render_sector_portfolio(viz_config, viz_id)
+        elif viz_type == "plotly_custom":
+            # Handle custom Plotly visualizations from Deep Research mode
+            render_custom_plotly(viz_config, viz_id)
         else:
             st.warning(f"Unknown visualization type: {viz_type}")
     except Exception as e:
         st.error(f"Error rendering visualization {viz_id}: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+
+
+def render_custom_plotly(config: dict, viz_id: str = None):
+    """Render custom Plotly visualization from Deep Research mode."""
+    try:
+        import plotly.graph_objects as go
+
+        # Extract the raw Plotly JSON
+        plotly_json = config.get("plotly_json")
+
+        if not plotly_json:
+            st.error("No Plotly data found in visualization config")
+            return
+
+        # Create figure from JSON
+        fig = go.Figure(plotly_json)
+
+        # Use unique key for this visualization
+        unique_key = f"{viz_id}_custom_plotly" if viz_id else "custom_plotly"
+
+        # Display the figure
+        st.plotly_chart(fig, use_container_width=True, key=unique_key)
+
+    except Exception as e:
+        st.error(f"Error rendering custom Plotly visualization: {str(e)}")
         import traceback
         st.code(traceback.format_exc())
 
@@ -1312,6 +1345,49 @@ def run_analysis_with_logs(user_input: str, conversation_history: list, enabled_
         raise e
 
 
+def run_deep_research_with_logs(user_input: str) -> str:
+    """Run deep research analysis and capture stdout/stderr to display in logs."""
+    # Create a StringIO object to capture output
+    captured_output = StringIO()
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+
+    try:
+        # Redirect stdout and stderr to capture output
+        sys.stdout = captured_output
+        sys.stderr = captured_output
+
+        # Run deep research (no conversation history needed - it does its own planning)
+        response = run_deep_research(user_input)
+
+        # Restore original stdout/stderr
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
+
+        # Get captured output and clean ANSI escape codes
+        raw_logs = captured_output.getvalue()
+        # Remove ANSI color codes (e.g., [36m, [0m, [1;36m, etc.)
+        ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+        cleaned_logs = ansi_escape.sub('', raw_logs)
+
+        # Store the cleaned logs in session state
+        st.session_state.agent_logs = cleaned_logs
+
+        return response
+
+    except Exception as e:
+        # Restore original stdout/stderr in case of error
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
+
+        # Clean and store what we captured plus the error
+        raw_logs = captured_output.getvalue()
+        ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+        cleaned_logs = ansi_escape.sub('', raw_logs)
+        st.session_state.agent_logs = cleaned_logs + f"\n\nError: {str(e)}"
+        raise e
+
+
 def extract_visualization_ids(response: str) -> list:
     """Extract visualization IDs from agent response."""
     import re
@@ -1348,6 +1424,41 @@ def extract_visualization_ids(response: str) -> list:
 
 # Sidebar
 with st.sidebar:
+    st.markdown("### ⚙️ Analysis Mode")
+
+    # Deep Research toggle
+    deep_research_enabled = st.toggle(
+        "🔬 Deep Research Mode",
+        value=st.session_state.deep_research_mode,
+        help="Enable comprehensive multi-step analysis with code execution. "
+             "The agent will decompose complex problems, write Python code dynamically, "
+             "and provide detailed insights. Best for complex questions like portfolio "
+             "optimization, strategy backtesting, or multi-factor analysis."
+    )
+
+    # Update session state if changed
+    if deep_research_enabled != st.session_state.deep_research_mode:
+        st.session_state.deep_research_mode = deep_research_enabled
+
+    # Show mode description
+    if st.session_state.deep_research_mode:
+        st.info(
+            "🔬 **Deep Research Active**\n\n"
+            "The agent will:\n"
+            "- Decompose problems into steps\n"
+            "- Write & execute Python code\n"
+            "- Generate custom visualizations\n"
+            "- Provide comprehensive analysis\n\n"
+            "⏱️ *This may take longer but provides deeper insights*"
+        )
+    else:
+        st.info(
+            "⚡ **Standard Mode Active**\n\n"
+            "Fast analysis using pre-built tools. "
+            "Switch to Deep Research for complex questions."
+        )
+
+    st.markdown("---")
     st.markdown("#### 📁 Available Data")
 
     with st.expander("📈 Dataset Information"):
@@ -1464,6 +1575,23 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("#### 💡 Example Questions")
 
+    # Deep Research examples
+    if st.session_state.deep_research_mode:
+        with st.expander("🔬 Deep Research Examples", expanded=True):
+            st.markdown("""
+            **Complex Multi-Step Analysis:**
+
+            - Recommend 5 stocks to long and 5 stocks to short based on fundamental analysis, momentum, and risk-adjusted returns
+            - Design and backtest a momentum-based trading strategy for DJ30 stocks from 2020-2023
+            - Identify the optimal portfolio allocation across sectors to maximize Sharpe ratio while limiting drawdown
+            - Analyze the relationship between Fed rate changes and tech stock performance, including lag effects
+            - Find companies with improving fundamentals but declining stock prices (value opportunities)
+            - Create a risk parity portfolio using macroeconomic regime analysis
+            - Implement a pairs trading strategy for correlated stocks in the same sector
+            - Analyze the predictive power of earnings call sentiment on stock returns
+            """)
+            st.caption("💡 Deep Research mode will decompose these into steps and write custom code")
+
     with st.expander("📊 Market Analysis"):
         st.markdown("""
         - Compare performance of S&P 500, Gold, and Bitcoin from 2020 to 2023
@@ -1574,8 +1702,11 @@ for message in st.session_state.messages:
         st.markdown(f'<div class="chat-message user-message"><strong>You:</strong><br>{content}</div>',
                    unsafe_allow_html=True)
     else:
-        st.markdown(f'<div class="chat-message assistant-message"><strong>🤖 Analyst:</strong><br>{content}</div>',
-                   unsafe_allow_html=True)
+        # Use container for styling but render markdown properly
+        st.markdown('<div class="chat-message assistant-message">', unsafe_allow_html=True)
+        st.markdown("**🤖 Analyst:**")
+        st.markdown(content)  # This will properly render markdown including ## headers
+        st.markdown('</div>', unsafe_allow_html=True)
 
         # Display visualizations for this message
         if "visualizations" in message:
@@ -1615,19 +1746,32 @@ if submit_button and user_input:
     clean_old_visualizations()
     st.session_state.current_visualizations = []
 
-    # Show loading state
-    with st.spinner("Thinking..."):
+    # Show loading state with appropriate message
+    spinner_message = "🔬 Conducting deep research..." if st.session_state.deep_research_mode else "Thinking..."
+
+    with st.spinner(spinner_message):
         try:
-            # Run analysis with conversation history for context and capture logs
-            response = run_analysis_with_logs(
-                user_input,
-                st.session_state.messages,
-                enabled_tool_categories=st.session_state.enabled_tool_categories
-            )
+            # Choose analysis mode based on toggle
+            if st.session_state.deep_research_mode:
+                # Deep Research Mode: Multi-step analysis with code execution
+                response = run_deep_research_with_logs(user_input)
+            else:
+                # Standard Mode: Fast analysis with pre-built tools
+                response = run_analysis_with_logs(
+                    user_input,
+                    st.session_state.messages,
+                    enabled_tool_categories=st.session_state.enabled_tool_categories
+                )
 
             # Validate response - check for empty or incomplete responses
             response_cleaned = response.strip() if response else ""
+
+            # Check for invalid responses
+            is_invalid = False
+            error_msg = ""
+
             if not response_cleaned or response_cleaned in ["```", "``", "`"]:
+                is_invalid = True
                 error_msg = (
                     "⚠️ The agent returned an incomplete response. This usually happens due to:\n"
                     "1. Context overflow (try clearing conversation history)\n"
@@ -1638,6 +1782,45 @@ if submit_button and user_input:
                     "- Clearing conversation history\n"
                     "- Asking again"
                 )
+
+            # Deep Research mode: Check if agent returned planning instead of final report
+            elif st.session_state.deep_research_mode:
+                # Detect planning/intermediate output patterns
+                planning_indicators = [
+                    "here's my plan",
+                    "here's a breakdown",
+                    "i will proceed",
+                    "let me start by",
+                    "i'll start with",
+                    "step 1:",
+                    "first, i'll",
+                    "first, i need to",
+                ]
+
+                response_lower = response_cleaned[:500].lower()  # Check first 500 chars
+
+                # Check if response looks like planning rather than final report
+                has_planning_language = any(indicator in response_lower for indicator in planning_indicators)
+                lacks_markdown_header = not response_cleaned.startswith("#")
+
+                # Allow if it has markdown structure even with planning language
+                has_proper_structure = "## executive summary" in response_lower or "## methodology" in response_lower
+
+                if has_planning_language and lacks_markdown_header and not has_proper_structure:
+                    is_invalid = True
+                    error_msg = (
+                        "⚠️ **Deep Research Error: Agent returned planning instead of analysis**\n\n"
+                        "The agent provided its workflow/plan instead of executing code and analyzing data.\n\n"
+                        "**What happened:** The agent stopped after the planning phase without running any code.\n\n"
+                        "**Please try:**\n"
+                        "1. Click 'Ask' again - the agent should execute code on the next attempt\n"
+                        "2. Simplify your question slightly\n"
+                        "3. Clear conversation history if the issue persists\n\n"
+                        "💡 **Tip:** Deep Research mode requires the agent to execute Python code. "
+                        "If this keeps happening, try Standard Mode instead."
+                    )
+
+            if is_invalid:
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": error_msg,

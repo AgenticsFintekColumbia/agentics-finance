@@ -283,6 +283,7 @@ def create_deep_research_task(agent: Agent, user_question: str) -> Task:
             "FORMATTING NOTES:\n"
             "- Use proper markdown headers (##, ###) for sections\n"
             "- Use bullet points for lists\n"
+			"- When quoting companies, use their names instead of tickers\n"
             "- Bold key terms and numbers for emphasis\n"
             "- Do NOT include internal 'Thought:', 'Action:', or tool-calling syntax in final report\n"
             "- Write as a polished, professional analysis report"

@@ -23,7 +23,7 @@ ENV/
 Thumbs.db
 
 # Git
-.git/
+# .git/
 .gitignore
 
 # Testing

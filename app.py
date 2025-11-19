@@ -111,7 +111,7 @@ if "enabled_tool_categories" not in st.session_state:
     st.session_state.enabled_tool_categories = list(get_tool_categories().keys())
 
 if "deep_research_mode" not in st.session_state:
-    st.session_state.deep_research_mode = False
+    st.session_state.deep_research_mode = True
 
 # Configuration: Maximum number of messages to keep in history
 # Prevents context overflow and memory issues in long conversations

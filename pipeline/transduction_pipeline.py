@@ -1,36 +1,16 @@
-"""
-Tools using agentics framework
-"""
-
 from crewai.tools import BaseTool
 from typing import Type, Optional, List
 from pydantic import BaseModel, Field
 from agentics import AG
 import pandas as pd
-import json
 import asyncio
 import os
 import csv
 import sys
-import io
 import traceback
 
 # Module-level variable to store selected columns from UI
 # This is set by the Streamlit app before running analysis
-_selected_columns_from_ui: Optional[List[str]] = None
-
-
-def set_selected_columns(columns: Optional[List[str]]):
-    """Set the selected columns from the UI. Called by Streamlit app before running analysis."""
-    global _selected_columns_from_ui
-    _selected_columns_from_ui = columns
-
-
-def get_selected_columns() -> Optional[List[str]]:
-    """Get the selected columns from the UI. Called by the tool during execution."""
-    return _selected_columns_from_ui
-
-
 class TransductionAnswer(BaseModel):
     detailed_answer: str | None = Field(
         None,
@@ -42,32 +22,20 @@ class TransductionAnswer(BaseModel):
     )
 
 
-class TransductionInput(BaseModel):
-    """Input schema for TransductionTool."""
-    question: str = Field(..., description="The question to answer")
-    start_date: str = Field(..., description="The start date of the data to use for the answer (YYYY-MM-DD)")
-    end_date: str = Field(..., description="The end date of the data to use for the answer (YYYY-MM-DD)")
-
-
-class UnifiedTransductionTool(BaseTool):
-    name: str = "Advanced Transduction Analysis"
-    description: str = (
-        "Answers complex financial questions that other tools cannot answer using the agentics framework. "
-        "This tool performs deep analysis by reducing large datasets into meaningful insights. "
-        "Use this tool when you need comprehensive analysis across a date range that requires "
-        "synthesizing information from multiple data points that standard tools cannot handle. "
-        "The tool analyzes a comprehensive merged dataset containing macroeconomic indicators, "
-        "market factors, DJ30 stock prices, company fundamentals, and news data. "
-        "\n\nInput format: question (str), start_date (YYYY-MM-DD), end_date (YYYY-MM-DD)\n"
-        "Note: For large date ranges (>100 rows), the tool automatically applies uniform temporal sampling "
-        "to analyze ~100 representative data points while preserving time-series patterns."
-    )
-    args_schema: Type[BaseModel] = TransductionInput
-
-    def _run(self, question: str, start_date: str, end_date: str) -> str:
+class TransductionPipeline:
+    def run(self, question: str) -> dict:
         try:
-            # Get selected columns from UI (set deterministically by user selection)
+            # Get selected columns and date range from UI (set deterministically by user selection)
+            from pipeline.runner import get_selected_columns, get_date_range
             selected_columns = get_selected_columns()
+            date_range = get_date_range()
+
+            # Use UI-provided date range if available, otherwise use defaults
+            if date_range:
+                start_date, end_date = date_range
+            else:
+                start_date = "2018-01-01"
+                end_date = "2025-01-01"
 
             print(f"\n{'='*80}")
             print(f"🔍 Starting Transduction Analysis")
@@ -86,10 +54,10 @@ class UnifiedTransductionTool(BaseTool):
                 csv_path = get_merged_data_file_for_agentics(data_dir)
             except FileNotFoundError as e:
                 print(f"❌ ERROR: {e}")
-                return json.dumps({
+                return {
                     "success": False,
                     "error": str(e)
-                }, indent=2)
+                }
 
             # Increase CSV field size limit to handle large text fields (e.g., Headlines, Earningcall)
             # Default limit is 131072 bytes (128KB), increase to handle large text content
@@ -142,10 +110,10 @@ class UnifiedTransductionTool(BaseTool):
                 print(f"✅ Filtered dataset to {len(columns_to_include)} columns (Date first)")
             else:
                 print(f"❌ You must select at least one column to analyze")
-                return json.dumps({
+                return {
                     "success": False,
                     "error": "You must select at least one column to analyze"
-                })
+                }
 
             # Find the indices that correspond to start_date and end_date
             # Agentics creates states where each state has attributes corresponding to CSV columns
@@ -165,10 +133,10 @@ class UnifiedTransductionTool(BaseTool):
 
             if start_index is None or end_index is None:
                 print(f"❌ ERROR: No data found for date range {start_date} to {end_date}")
-                return json.dumps({
+                return {
                     "success": False,
                     "error": f"No data found for date range {start_date} to {end_date}"
-                })
+                }
 
             # Calculate the number of rows in our date range
             num_rows = end_index - start_index
@@ -372,13 +340,14 @@ class UnifiedTransductionTool(BaseTool):
                 }
 
                 print(f"✅ Returning result with {len(result)} fields\n")
-                return json.dumps(result, indent=2)
+                print(result)
+                return result
             else:
                 print("❌ ERROR: Failed to generate answer - empty result from transduction\n")
-                return json.dumps({
+                return {
                     "success": False,
                     "error": "Failed to generate answer"
-                })
+                }
 
         except Exception as e:
             error_msg = str(e)
@@ -393,8 +362,8 @@ class UnifiedTransductionTool(BaseTool):
             print(error_trace)
             print("=" * 80 + "\n")
 
-            return json.dumps({
+            return {
                 "success": False,
                 "error": error_msg,
                 "traceback": error_trace
-            }, indent=2)
+            }

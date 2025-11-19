@@ -170,13 +170,14 @@ def create_deep_research_agent():
             "4. You ONLY provide final answer when you have executed code, analyzed data, and have specific results\n"
             "5. Final answer MUST start with '## Executive Summary' and contain real numbers from your analysis\n"
             "\n⚠️ WRONG: Providing 'Here is my plan... Step 1: I will load data...'\n"
-            "✅ RIGHT: Execute code → get results → provide report with '## Executive Summary' and actual data"
+            "✅ RIGHT: Call execute_python_code() tool with the code inside the tool argument\n"
+            "6. You NEVER write code blocks (```python) in your text response - ONLY inside the tool"
         ),
         tools=tools,
         llm=llm,
         verbose=True,
         allow_delegation=False,
-        max_iter=15,  # Sufficient iterations for comprehensive multi-step analysis with visualizations
+        max_iter=25,  # Increased iterations for comprehensive multi-step analysis
         memory=False,  # Disable memory to keep each query independent
         respect_context_window=True,
         step_callback=None  # Ensure clean final output
@@ -203,7 +204,8 @@ def create_deep_research_task(agent: Agent, user_question: str) -> Task:
             f"RESEARCH QUESTION: {user_question}\n\n"
             f"⚠️ CRITICAL INSTRUCTIONS - READ CAREFULLY:\n"
             f"1. You MUST use the execute_python_code() tool multiple times to perform analysis\n"
-            f"2. Do NOT just write code - EXECUTE it using the tool!\n"
+            f"2. Do NOT just write code in markdown - EXECUTE it using the tool!\n"
+            f"3. If you write a code block in your response, you have FAILED. Code must be in the tool call.\n"
             f"3. Do NOT provide your final answer until AFTER you have executed code\n"
             f"4. Your planning/workflow is NOT your final answer - it's just your internal process\n"
             f"5. ONLY provide final answer when you have:\n"

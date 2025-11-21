@@ -51,6 +51,9 @@ from tools import (
     PriceChartTool,
     PerformanceComparisonChartTool,
     VolatilityChartTool,
+    GMVPortfolioConstructionTool,
+    PortfolioEvaluationTool,
+    GMVPortfolioVisualizationTool,
 )
 import os
 from dotenv import load_dotenv
@@ -80,6 +83,7 @@ def get_tool_categories():
         "DJ30 Price Analysis": "Analyze DJ30 stock returns, volatility, performance",
         "DJ30 Portfolios": "Construct volatility/momentum/sector-based portfolios",
         "DJ30 Visualizations": "Price charts, performance comparisons for DJ30 stocks",
+        "GMV Portfolio": "Global Minimum Variance portfolio construction and evaluation using nodewise regression",
     }
 
 
@@ -182,6 +186,11 @@ def create_financial_analyst_agent(enabled_tool_categories=None):
             PerformanceComparisonChartTool(),
             VolatilityChartTool(),
         ],
+        "GMV Portfolio": [
+            GMVPortfolioConstructionTool(),
+            PortfolioEvaluationTool(),
+            GMVPortfolioVisualizationTool(),
+        ],
     }
 
     # Filter tools based on enabled categories
@@ -283,6 +292,12 @@ def generate_tool_instructions(enabled_tool_categories: list = None) -> str:
 
     if "DJ30 Visualizations" in enabled_tool_categories:
         instructions.append("   - For DJ30 PRICE CHARTS: Use PriceChartTool (candlestick/OHLC), PerformanceComparisonChartTool, VolatilityChartTool")
+
+    if "GMV Portfolio" in enabled_tool_categories:
+        instructions.append("   - For GMV PORTFOLIO CONSTRUCTION: Use GMVPortfolioConstructionTool to build optimal minimum variance portfolios via nodewise regression")
+        instructions.append("   - For PORTFOLIO BACKTESTING: Use PortfolioEvaluationTool to evaluate portfolio performance with Sharpe ratios and risk metrics")
+        instructions.append("   - For GMV VISUALIZATION: Use GMVPortfolioVisualizationTool to create efficient frontier plots showing simulated portfolios and GMV solution")
+        instructions.append("   - NOTE: GMV tools require csv_path to DJ30 data with columns like 'close_AAPL' and 'TB3MS' (risk-free rate)")
 
     # Add general guidance
     instructions.append("   - DO NOT query data before creating visualizations (it creates token overload)")

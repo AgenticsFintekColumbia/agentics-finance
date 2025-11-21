@@ -73,6 +73,13 @@ from .dj30_visualization_tools import (
     PerformanceComparisonChartTool,
     VolatilityChartTool
 )
+from .gmv_portfolio_tools import (
+    GMVPortfolioConstructionTool,
+    PortfolioEvaluationTool,
+)
+from .gmv_visualization_tool import (
+    GMVPortfolioVisualizationTool,
+)
 
 __all__ = [
     # Data query tools
@@ -135,5 +142,9 @@ __all__ = [
     'PriceChartTool',
     'PerformanceComparisonChartTool',
     'VolatilityChartTool',
+    # GMV portfolio tools
+    'GMVPortfolioConstructionTool',
+    'PortfolioEvaluationTool',
+    'GMVPortfolioVisualizationTool',
 ]
 

@@ -233,6 +233,8 @@ def load_visualization(viz_id: str):
             render_momentum_portfolio(viz_config, viz_id)
         elif viz_type == "sector_portfolio":
             render_sector_portfolio(viz_config, viz_id)
+        elif viz_type == "gmv_efficient_frontier":
+            render_gmv_efficient_frontier(viz_config, viz_id)
         elif viz_type == "plotly_custom":
             # Handle custom Plotly visualizations from Deep Research mode
             render_custom_plotly(viz_config, viz_id)
@@ -1302,6 +1304,215 @@ def render_sector_portfolio(config: dict, viz_id: str = None):
     st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_sector" if viz_id else None)
 
 
+def render_gmv_efficient_frontier(config: dict, viz_id: str = None):
+    """Render GMV portfolio efficient frontier visualization."""
+    simulated_portfolios = config["simulated_portfolios"]
+    gmv_portfolio = config["gmv_portfolio"]
+    equal_weight_portfolio = config["equal_weight_portfolio"]
+    metadata = config.get("metadata", {})
+
+    st.markdown(f"### {config.get('title', 'GMV Portfolio Efficient Frontier')}")
+
+    # Display key metrics
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric(
+            "GMV Return",
+            f"{gmv_portfolio['return']*100:.2f}%",
+            help="Annualized expected return of GMV portfolio"
+        )
+        st.metric(
+            "GMV Volatility",
+            f"{gmv_portfolio['volatility']*100:.2f}%",
+            help="Annualized volatility (risk) of GMV portfolio"
+        )
+        st.metric(
+            "GMV Sharpe Ratio",
+            f"{gmv_portfolio['sharpe']:.4f}",
+            help="Risk-adjusted return metric"
+        )
+
+    with col2:
+        st.metric(
+            "Equal-Weight Return",
+            f"{equal_weight_portfolio['return']*100:.2f}%"
+        )
+        st.metric(
+            "Equal-Weight Volatility",
+            f"{equal_weight_portfolio['volatility']*100:.2f}%"
+        )
+        st.metric(
+            "Equal-Weight Sharpe",
+            f"{equal_weight_portfolio['sharpe']:.4f}"
+        )
+
+    with col3:
+        variance_reduction = ((equal_weight_portfolio['volatility'] - gmv_portfolio['volatility']) /
+                              equal_weight_portfolio['volatility']) * 100
+        st.metric(
+            "Variance Reduction",
+            f"{variance_reduction:.2f}%",
+            help="Volatility reduction vs. equal-weight portfolio"
+        )
+        st.metric(
+            "# of Assets",
+            metadata.get('n_assets', 'N/A')
+        )
+        st.metric(
+            "# of Simulations",
+            f"{metadata.get('n_simulations', 0):,}"
+        )
+
+    st.markdown("---")
+
+    # Create efficient frontier scatter plot
+    sim_returns = [p['return'] * 100 for p in simulated_portfolios]  # Convert to percentage
+    sim_volatilities = [p['volatility'] * 100 for p in simulated_portfolios]
+    sim_sharpes = [p['sharpe'] for p in simulated_portfolios]
+
+    fig = go.Figure()
+
+    # Simulated portfolios (colored by Sharpe ratio)
+    fig.add_trace(go.Scatter(
+        x=sim_volatilities,
+        y=sim_returns,
+        mode='markers',
+        name='Simulated Portfolios',
+        marker=dict(
+            size=4,
+            color=sim_sharpes,
+            colorscale='RdYlGn',  # Red (low) to Yellow to Green (high)
+            colorbar=dict(
+                title="Sharpe<br>Ratio",
+                x=1.15
+            ),
+            showscale=True,
+            opacity=0.6
+        ),
+        text=[f"Return: {r:.2f}%<br>Volatility: {v:.2f}%<br>Sharpe: {s:.4f}"
+              for r, v, s in zip(sim_returns, sim_volatilities, sim_sharpes)],
+        hovertemplate='%{text}<extra></extra>'
+    ))
+
+    # GMV Portfolio (highlighted)
+    fig.add_trace(go.Scatter(
+        x=[gmv_portfolio['volatility'] * 100],
+        y=[gmv_portfolio['return'] * 100],
+        mode='markers+text',
+        name='GMV Portfolio',
+        marker=dict(
+            size=20,
+            color='blue',
+            symbol='star',
+            line=dict(color='darkblue', width=2)
+        ),
+        text=['GMV'],
+        textposition='top center',
+        textfont=dict(size=12, color='blue', family='Arial Black'),
+        hovertemplate=(
+            f"<b>GMV Portfolio (Nodewise Lasso)</b><br>"
+            f"Return: {gmv_portfolio['return']*100:.2f}%<br>"
+            f"Volatility: {gmv_portfolio['volatility']*100:.2f}%<br>"
+            f"Sharpe: {gmv_portfolio['sharpe']:.4f}<br>"
+            "<extra></extra>"
+        )
+    ))
+
+    # Equal-Weight Portfolio (for comparison)
+    fig.add_trace(go.Scatter(
+        x=[equal_weight_portfolio['volatility'] * 100],
+        y=[equal_weight_portfolio['return'] * 100],
+        mode='markers+text',
+        name='Equal-Weight',
+        marker=dict(
+            size=15,
+            color='orange',
+            symbol='diamond',
+            line=dict(color='darkorange', width=2)
+        ),
+        text=['Equal'],
+        textposition='top center',
+        textfont=dict(size=10, color='orange'),
+        hovertemplate=(
+            f"<b>Equal-Weight Portfolio</b><br>"
+            f"Return: {equal_weight_portfolio['return']*100:.2f}%<br>"
+            f"Volatility: {equal_weight_portfolio['volatility']*100:.2f}%<br>"
+            f"Sharpe: {equal_weight_portfolio['sharpe']:.4f}<br>"
+            "<extra></extra>"
+        )
+    ))
+
+    fig.update_layout(
+        title=dict(
+            text=f"Efficient Frontier: {metadata.get('n_simulations', 0):,} Simulated Portfolios",
+            x=0.5,
+            xanchor='center',
+            font=dict(size=18, color='rgba(50,50,50,0.9)')
+        ),
+        xaxis_title="Annualized Volatility (%)",
+        yaxis_title="Annualized Return (%)",
+        hovermode='closest',
+        height=600,
+        showlegend=True,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01,
+            bgcolor="rgba(255,255,255,0.4)",
+            bordercolor="rgba(200,200,200,0.3)",
+            borderwidth=1
+        ),
+        plot_bgcolor='rgba(0,0,0,0)',  # Transparent plot background
+        paper_bgcolor='rgba(0,0,0,0)',  # Transparent paper background
+        font=dict(
+            family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+            color='rgba(50,50,50,0.9)'
+        )
+    )
+
+    # Add subtle grid
+    fig.update_xaxes(
+        showgrid=True,
+        gridwidth=0.5,
+        gridcolor='rgba(150,150,150,0.15)',
+        zeroline=True,
+        zerolinewidth=1,
+        zerolinecolor='rgba(150,150,150,0.3)'
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridwidth=0.5,
+        gridcolor='rgba(150,150,150,0.15)',
+        zeroline=True,
+        zerolinewidth=1,
+        zerolinecolor='rgba(150,150,150,0.3)'
+    )
+
+    st.plotly_chart(fig, use_container_width=True, key=f"{viz_id}_efficient_frontier" if viz_id else None)
+
+    # Display top holdings
+    st.markdown("#### GMV Portfolio Top Holdings")
+    weights = gmv_portfolio.get('weights', {})
+    sorted_weights = sorted(weights.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    col1, col2 = st.columns(2)
+    for i, (asset, weight) in enumerate(sorted_weights):
+        col = col1 if i % 2 == 0 else col2
+        with col:
+            st.markdown(f"**{asset}**: {weight*100:.2f}%")
+
+    # Explanation
+    st.markdown("---")
+    st.info(
+        "📊 **Interpretation**: The blue star shows the GMV (Global Minimum Variance) portfolio "
+        "computed via nodewise Lasso regression. It achieves the lowest volatility among all possible portfolios. "
+        "Each gray dot represents a randomly simulated portfolio, colored by its Sharpe ratio (green = better risk-adjusted returns). "
+        "The orange diamond shows an equal-weight benchmark for comparison."
+    )
+
+
 def run_analysis_with_logs(user_input: str, conversation_history: list, enabled_tool_categories: list = None) -> str:
     """Run analysis and capture stdout/stderr to display in logs."""
     # Create a StringIO object to capture output
@@ -1646,6 +1857,26 @@ with st.sidebar:
         - Which DJ30 stocks had the highest volatility in 2024?
         - Show me performance comparison of all tech stocks in DJ30 from 2020-2024
         """)
+
+    with st.expander("🎯 GMV Portfolio Analysis", expanded=False):
+        st.info("💡 **New!** Global Minimum Variance portfolio construction using nodewise Lasso regression with efficient frontier visualization")
+        st.markdown("""
+        **Portfolio Construction:**
+        - Construct a Global Minimum Variance portfolio for DJ30 stocks from 2020 to 2022 and visualize the efficient frontier
+        - Build a GMV portfolio using only technology stocks (AAPL, MSFT, CRM, etc.) and visualize the efficient frontier
+        - What are the optimal GMV weights for a portfolio of AAPL, MSFT, JPM, and JNJ?
+        - Build a minimum variance portfolio and show me the largest position allocations
+
+        **Backtesting & Evaluation:**
+        - Create a GMV portfolio trained on 2020-2021 data and evaluate it on 2022-2023
+        - Evaluate a GMV portfolio on Q1 2023 data and report the annualized Sharpe ratio
+        - Compare the Sharpe ratio of a GMV portfolio vs equal-weight portfolio
+
+        **Advanced Analysis:**
+        - Build a GMV portfolio for Q1 2020, then backtest it on Q2-Q4 2020 to see how it performed during COVID
+        - Compare GMV portfolio performance across different market regimes (2019 pre-COVID, 2020 crisis, 2021-2022 recovery)
+        """)
+
 
     with st.expander("💹 DJ30 Stock Analysis"):
         st.markdown("""

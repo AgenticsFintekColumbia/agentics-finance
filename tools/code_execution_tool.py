@@ -27,6 +27,34 @@ def _execute_python_code_impl(code: str) -> str:
     Returns:
         String containing the execution output or error message
     """
+    # Safety Check: Static Analysis using AST
+    try:
+        import ast
+        tree = ast.parse(code)
+
+        for node in ast.walk(tree):
+            # Check for forbidden imports
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for name in node.names:
+                    if name.name.split('.')[0] in ['os', 'sys', 'subprocess', 'shutil']:
+                        return f"❌ Safety Error: Import of '{name.name}' is forbidden."
+
+            # Check for forbidden function calls
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name):
+                    if node.func.id in ['open', 'exec', 'eval', '__import__', 'input']:
+                        return f"❌ Safety Error: Call to '{node.func.id}()' is forbidden."
+                elif isinstance(node.func, ast.Attribute):
+                    # Block subprocess.run, os.system etc if they slipped through import checks
+                    # (Though import check should catch them, this is double safety)
+                    if node.func.attr in ['system', 'popen', 'run', 'spawn']:
+                        return f"❌ Safety Error: Call to method '{node.func.attr}' is forbidden."
+
+    except SyntaxError as e:
+        return f"❌ Syntax Error in code: {e}"
+    except Exception as e:
+        return f"❌ Safety Check Failed: {e}"
+
     # Capture stdout and stderr
     old_stdout = sys.stdout
     old_stderr = sys.stderr
@@ -86,7 +114,66 @@ def _execute_python_code_impl(code: str) -> str:
             """
             return _save_plotly_figure_impl(fig.to_json(), filename)
 
+        # Add helper function to get news sentiment
+        def get_news_sentiment(start_date=None, end_date=None):
+            """
+            Helper function to get daily news sentiment scores.
+            Returns a DataFrame with 'Date' and 'sentiment_score' (-1 to 1).
+            """
+            try:
+                from textblob import TextBlob
+                import ast
+
+                # Load market data which contains headlines
+                df = pd.read_csv('./data/market_factors_new.csv')
+                df['Date'] = pd.to_datetime(df['Date'])
+
+                # Filter by date if provided
+                if start_date:
+                    df = df[df['Date'] >= pd.to_datetime(start_date)]
+                if end_date:
+                    df = df[df['Date'] <= pd.to_datetime(end_date)]
+
+                sentiment_scores = []
+                dates = []
+
+                for _, row in df.iterrows():
+                    headlines_raw = row.get('Headlines')
+                    if pd.isna(headlines_raw):
+                        continue
+
+                    try:
+                        # Parse stringified list
+                        headlines = ast.literal_eval(str(headlines_raw))
+                        if not isinstance(headlines, list):
+                            headlines = [str(headlines_raw)]
+
+                        # Calculate average sentiment for the day
+                        day_scores = []
+                        for h in headlines:
+                            if h and isinstance(h, str):
+                                blob = TextBlob(h)
+                                day_scores.append(blob.sentiment.polarity)
+
+                        if day_scores:
+                            avg_score = sum(day_scores) / len(day_scores)
+                            sentiment_scores.append(avg_score)
+                            dates.append(row['Date'])
+                    except:
+                        continue
+
+                result_df = pd.DataFrame({
+                    'Date': dates,
+                    'sentiment_score': sentiment_scores
+                })
+                result_df.set_index('Date', inplace=True)
+                return result_df
+            except Exception as e:
+                print(f"Error calculating sentiment: {e}")
+                return pd.DataFrame()
+
         exec_globals['save_figure'] = save_figure
+        exec_globals['get_news_sentiment'] = get_news_sentiment
 
         # Execute the code
         exec(code, exec_globals)

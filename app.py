@@ -15,7 +15,7 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from agents import run_analysis, get_tool_categories, run_deep_research
+from agents import run_analysis, get_tool_categories
 from utils import get_data_summary, get_column_descriptions, get_firm_data_summary, get_firm_column_descriptions, get_dj30_data_summary, get_dj30_column_descriptions
 
 # Page configuration
@@ -102,6 +102,9 @@ if "clear_input" not in st.session_state:
 
 if "agent_logs" not in st.session_state:
     st.session_state.agent_logs = ""
+
+if "current_plan" not in st.session_state:
+    st.session_state.current_plan = ""
 
 if "show_logs" not in st.session_state:
     st.session_state.show_logs = True
@@ -1556,7 +1559,7 @@ def run_analysis_with_logs(user_input: str, conversation_history: list, enabled_
         raise e
 
 
-def run_deep_research_with_logs(user_input: str) -> str:
+def run_deep_research_with_logs(user_input: str, plan_placeholder=None) -> str:
     """Run deep research analysis and capture stdout/stderr to display in logs."""
     # Create a StringIO object to capture output
     captured_output = StringIO()
@@ -1568,8 +1571,28 @@ def run_deep_research_with_logs(user_input: str) -> str:
         sys.stdout = captured_output
         sys.stderr = captured_output
 
-        # Run deep research (no conversation history needed - it does its own planning)
-        response = run_deep_research(user_input)
+        from agents.deep_research_analyst import generate_research_plan, execute_research_plan
+
+        # 1. Planning Phase
+        plan = ""
+        if plan_placeholder:
+            with plan_placeholder.container():
+                # Use status for the planning phase
+                with st.status("🧠 Generating Research Plan...", expanded=True) as status:
+                    plan = generate_research_plan(user_input)
+                    status.markdown(plan)
+                    status.update(label="🧠 Research Plan", state="complete", expanded=False)
+        else:
+            plan = generate_research_plan(user_input)
+
+        # Store the plan in session state for display
+        st.session_state.current_plan = plan
+
+        # 2. Execution Phase
+        with st.spinner("🔬 Conducting deep research..."):
+            response = execute_research_plan(user_input, plan)
+
+        print("RESPONSE RESPONSE: ", response)
 
         # Restore original stdout/stderr
         sys.stdout = original_stdout
@@ -1637,10 +1660,20 @@ def extract_visualization_ids(response: str) -> list:
 with st.sidebar:
     st.markdown("### ⚙️ Analysis Mode")
 
-    # Deep Research toggle
+    # Auto-Routing Toggle
+    auto_routing = st.toggle(
+        "🤖 Auto-Routing",
+        value=st.session_state.get("auto_routing", True),
+        key="auto_routing_toggle",
+        help="Automatically route queries to the best agent based on complexity."
+    )
+    st.session_state.auto_routing = auto_routing
+
+    # Deep Research toggle (Manual Override)
     deep_research_enabled = st.toggle(
         "🔬 Deep Research Mode",
         value=st.session_state.deep_research_mode,
+        disabled=st.session_state.auto_routing,
         help="Enable comprehensive multi-step analysis with code execution. "
              "The agent will decompose complex problems, write Python code dynamically, "
              "and provide detailed insights. Best for complex questions like portfolio "
@@ -1670,6 +1703,7 @@ with st.sidebar:
         )
 
     st.markdown("---")
+
     st.markdown("#### 📁 Available Data")
 
     with st.expander("📈 Dataset Information"):
@@ -1859,7 +1893,6 @@ with st.sidebar:
         """)
 
     with st.expander("🎯 GMV Portfolio Analysis", expanded=False):
-        st.info("💡 **New!** Global Minimum Variance portfolio construction using nodewise Lasso regression with efficient frontier visualization")
         st.markdown("""
         **Portfolio Construction:**
         - Construct a Global Minimum Variance portfolio for DJ30 stocks from 2020 to 2022 and visualize the efficient frontier
@@ -1928,10 +1961,23 @@ st.markdown('<div class="sub-header">Ask questions about macroeconomic data, mar
 for message in st.session_state.messages:
     role = message["role"]
     content = message["content"]
+    msg_type = message.get("type", None)
 
     if role == "user":
         st.markdown(f'<div class="chat-message user-message"><strong>You:</strong><br>{content}</div>',
                    unsafe_allow_html=True)
+    elif role == "system":
+        # Handle system messages (routing, planning)
+        if msg_type == "routing":
+            # Display routing decision as a status widget
+            route = message.get("route", "unknown")
+            icon = "🔬" if route == "deep_research" else "⚡"
+            with st.status(f"{icon} {content}", state="complete", expanded=False):
+                st.write(f"Query classified as: **{route.replace('_', ' ').title()}**")
+        elif msg_type == "plan":
+            # Display plan as an expander
+            with st.expander("🧠 Research Plan", expanded=False):
+                st.markdown(content)
     else:
         # Use container for styling but render markdown properly
         st.markdown('<div class="chat-message assistant-message">', unsafe_allow_html=True)
@@ -1977,105 +2023,165 @@ if submit_button and user_input:
     clean_old_visualizations()
     st.session_state.current_visualizations = []
 
-    # Show loading state with appropriate message
-    spinner_message = "🔬 Conducting deep research..." if st.session_state.deep_research_mode else "Thinking..."
+    # Determine mode via Router Agent (if Auto-Routing is on)
+    if "auto_routing" not in st.session_state:
+        st.session_state.auto_routing = True
 
-    with st.spinner(spinner_message):
-        try:
-            # Choose analysis mode based on toggle
-            if st.session_state.deep_research_mode:
-                # Deep Research Mode: Multi-step analysis with code execution
-                response = run_deep_research_with_logs(user_input)
+    # Logic: If Auto-Routing is ON, use classifier. Else use the manual toggle state.
+    use_deep_research = st.session_state.deep_research_mode # Initialize with current manual toggle state
+
+    routing_message = None
+
+    if st.session_state.auto_routing:
+        with st.status("🔄 Routing query...", expanded=False) as status:
+            from agents.router_agent import classify_query
+            route = classify_query(user_input) # Use user_input here
+            status.write(f"Classified as: **{route.upper()}**")
+
+            if "complex" in route:
+                use_deep_research = True
+                routing_label = "✅ Routed to Deep Research Agent"
+                routing_message = {
+                    "role": "system",
+                    "type": "routing",
+                    "content": routing_label,
+                    "route": "deep_research"
+                }
+                status.update(label=routing_label, state="complete", expanded=False)
             else:
-                # Standard Mode: Fast analysis with pre-built tools
-                response = run_analysis_with_logs(
-                    user_input,
-                    st.session_state.messages,
-                    enabled_tool_categories=st.session_state.enabled_tool_categories
-                )
+                use_deep_research = False
+                routing_label = "✅ Routed to Financial Analyst"
+                routing_message = {
+                    "role": "system",
+                    "type": "routing",
+                    "content": routing_label,
+                    "route": "financial_analyst"
+                }
+                status.update(label=routing_label, state="complete", expanded=False)
 
-            # Validate response - check for empty or incomplete responses
-            response_cleaned = response.strip() if response else ""
+            # Update the toggle state visually to match decision
+            st.session_state.deep_research_mode = use_deep_research
 
-            # Check for invalid responses
-            is_invalid = False
-            error_msg = ""
+        # Add routing message to history
+        if routing_message:
+            st.session_state.messages.append(routing_message)
+    else:
+        # If auto-routing is off, use the manual toggle state directly
+        use_deep_research = st.session_state.deep_research_mode
 
-            if not response_cleaned or response_cleaned in ["```", "``", "`"]:
+
+    # Show loading state with appropriate message
+    # spinner_message = "🔬 Conducting deep research..." if use_deep_research else "Thinking..."
+
+    # with st.spinner(spinner_message):
+    try:
+        # Choose analysis mode based on routing decision
+        if use_deep_research:
+            # Deep Research Mode: Multi-step analysis with code execution
+
+            # Create a placeholder for the plan in the main chat area
+            plan_placeholder = st.empty()
+
+            # Pass plan_placeholder to update UI in real-time
+            response = run_deep_research_with_logs(user_input, plan_placeholder=plan_placeholder)
+
+            # Store the plan as a system message for persistence
+            if st.session_state.current_plan:
+                st.session_state.messages.append({
+                    "role": "system",
+                    "type": "plan",
+                    "content": st.session_state.current_plan
+                })
+        else:
+            # Standard Mode: Fast analysis with pre-built tools
+            response = run_analysis_with_logs(
+                user_input,
+                st.session_state.messages,
+                enabled_tool_categories=st.session_state.enabled_tool_categories
+            )
+
+        # Validate response - check for empty or incomplete responses
+        response_cleaned = response.strip() if response else ""
+
+        # Check for invalid responses
+        is_invalid = False
+        error_msg = ""
+
+        if not response_cleaned or response_cleaned in ["```", "``", "`"]:
+            is_invalid = True
+            error_msg = (
+                "⚠️ The agent returned an incomplete response. This usually happens due to:\n"
+                "1. Context overflow (try clearing conversation history)\n"
+                "2. Tool output being too large\n"
+                "3. LLM formatting confusion\n\n"
+                "Please try:\n"
+                "- Simplifying your question\n"
+                "- Clearing conversation history\n"
+                "- Asking again"
+            )
+
+        # Deep Research mode: Check if agent returned planning instead of final report
+        elif st.session_state.deep_research_mode:
+            # Detect planning/intermediate output patterns
+            planning_indicators = [
+                "here's my plan",
+                "here's a breakdown",
+                "i will proceed",
+                "let me start by",
+                "i'll start with",
+                "step 1:",
+                "first, i'll",
+                "first, i need to",
+            ]
+
+            response_lower = response_cleaned[:500].lower()  # Check first 500 chars
+
+            # Check if response looks like planning rather than final report
+            has_planning_language = any(indicator in response_lower for indicator in planning_indicators)
+            lacks_markdown_header = not response_cleaned.startswith("#")
+
+            # Allow if it has markdown structure even with planning language
+            has_proper_structure = "## executive summary" in response_lower or "## methodology" in response_lower
+
+            if has_planning_language and lacks_markdown_header and not has_proper_structure:
                 is_invalid = True
                 error_msg = (
-                    "⚠️ The agent returned an incomplete response. This usually happens due to:\n"
-                    "1. Context overflow (try clearing conversation history)\n"
-                    "2. Tool output being too large\n"
-                    "3. LLM formatting confusion\n\n"
-                    "Please try:\n"
-                    "- Simplifying your question\n"
-                    "- Clearing conversation history\n"
-                    "- Asking again"
+                    "⚠️ **Deep Research Error: Agent returned planning instead of analysis**\n\n"
+                    "The agent provided its workflow/plan instead of executing code and analyzing data.\n\n"
+                    "**What happened:** The agent stopped after the planning phase without running any code.\n\n"
+                    "**Please try:**\n"
+                    "1. Click 'Ask' again - the agent should execute code on the next attempt\n"
+                    "2. Simplify your question slightly\n"
+                    "3. Clear conversation history if the issue persists\n\n"
+                    "💡 **Tip:** Deep Research mode requires the agent to execute Python code. "
+                    "If this keeps happening, try Standard Mode instead."
                 )
 
-            # Deep Research mode: Check if agent returned planning instead of final report
-            elif st.session_state.deep_research_mode:
-                # Detect planning/intermediate output patterns
-                planning_indicators = [
-                    "here's my plan",
-                    "here's a breakdown",
-                    "i will proceed",
-                    "let me start by",
-                    "i'll start with",
-                    "step 1:",
-                    "first, i'll",
-                    "first, i need to",
-                ]
-
-                response_lower = response_cleaned[:500].lower()  # Check first 500 chars
-
-                # Check if response looks like planning rather than final report
-                has_planning_language = any(indicator in response_lower for indicator in planning_indicators)
-                lacks_markdown_header = not response_cleaned.startswith("#")
-
-                # Allow if it has markdown structure even with planning language
-                has_proper_structure = "## executive summary" in response_lower or "## methodology" in response_lower
-
-                if has_planning_language and lacks_markdown_header and not has_proper_structure:
-                    is_invalid = True
-                    error_msg = (
-                        "⚠️ **Deep Research Error: Agent returned planning instead of analysis**\n\n"
-                        "The agent provided its workflow/plan instead of executing code and analyzing data.\n\n"
-                        "**What happened:** The agent stopped after the planning phase without running any code.\n\n"
-                        "**Please try:**\n"
-                        "1. Click 'Ask' again - the agent should execute code on the next attempt\n"
-                        "2. Simplify your question slightly\n"
-                        "3. Clear conversation history if the issue persists\n\n"
-                        "💡 **Tip:** Deep Research mode requires the agent to execute Python code. "
-                        "If this keeps happening, try Standard Mode instead."
-                    )
-
-            if is_invalid:
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": error_msg,
-                    "visualizations": []
-                })
-            else:
-                # Extract visualization IDs from response
-                viz_ids = extract_visualization_ids(response)
-                st.session_state.current_visualizations = viz_ids
-
-                # Add assistant message
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": response,
-                    "visualizations": viz_ids
-                })
-
-        except Exception as e:
-            st.error(f"Error during analysis: {str(e)}")
+        if is_invalid:
             st.session_state.messages.append({
                 "role": "assistant",
-                "content": f"I encountered an error: {str(e)}. Please try rephrasing your question.",
+                "content": error_msg,
                 "visualizations": []
             })
+        else:
+            # Extract visualization IDs from response
+            viz_ids = extract_visualization_ids(response)
+            st.session_state.current_visualizations = viz_ids
+
+            # Add assistant message
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response,
+                "visualizations": viz_ids
+            })
+
+    except Exception as e:
+        st.error(f"Error during analysis: {str(e)}")
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": f"I encountered an error: {str(e)}. Please try rephrasing your question.",
+            "visualizations": []
+        })
 
     # Set flag to clear input on next run
     st.session_state.clear_input = True

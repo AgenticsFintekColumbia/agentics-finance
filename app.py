@@ -1516,6 +1516,50 @@ def render_gmv_efficient_frontier(config: dict, viz_id: str = None):
     )
 
 
+def extract_visualization_ids(response: str, start_time: float = 0) -> list:
+    """
+    Extract visualization IDs from agent response and file system.
+
+    Args:
+        response: The text response from the agent
+        start_time: Timestamp when the generation started (to find new files)
+
+    Returns:
+        List of visualization IDs sorted by creation time
+    """
+    import re
+    import glob
+    import os
+    from datetime import datetime
+
+    # 1. Find all visualization files created AFTER the start time
+    viz_dir = os.path.join(os.path.dirname(__file__), "visualizations")
+    new_viz_files = []
+
+    if os.path.exists(viz_dir):
+        for viz_file in glob.glob(os.path.join(viz_dir, "viz_*.json")):
+            try:
+                mtime = os.path.getmtime(viz_file)
+                if mtime >= start_time:
+                    viz_id = os.path.basename(viz_file).replace('.json', '')
+                    new_viz_files.append((mtime, viz_id))
+            except OSError:
+                continue
+
+    # Sort by creation time to preserve logical order
+    new_viz_files.sort(key=lambda x: x[0])
+    file_viz_ids = [v[1] for v in new_viz_files]
+
+    # 2. Extract IDs explicitly mentioned in the text (fallback/legacy)
+    text_viz_ids = re.findall(r'viz_\d{8}_\d{6}_[a-f0-9]{8}', response)
+
+    # 3. Combine: File-detected IDs first (chronological), then any text-only IDs
+    # Use dict.fromkeys to deduplicate while preserving order
+    all_ids = list(dict.fromkeys(file_viz_ids + text_viz_ids))
+
+    return all_ids
+
+
 def run_analysis_with_logs(user_input: str, conversation_history: list, enabled_tool_categories: list = None) -> str:
     """Run analysis and capture stdout/stderr to display in logs."""
     # Create a StringIO object to capture output
@@ -1620,40 +1664,6 @@ def run_deep_research_with_logs(user_input: str, plan_placeholder=None) -> str:
         cleaned_logs = ansi_escape.sub('', raw_logs)
         st.session_state.agent_logs = cleaned_logs + f"\n\nError: {str(e)}"
         raise e
-
-
-def extract_visualization_ids(response: str) -> list:
-    """Extract visualization IDs from agent response."""
-    import re
-    import glob
-    from datetime import datetime, timedelta
-
-    # First, try to extract from response text
-    viz_ids = re.findall(r'viz_\d{8}_\d{6}_[a-f0-9]{8}', response)
-
-    # Get all visualization IDs already used in previous messages
-    existing_viz_ids = set()
-    for message in st.session_state.messages:
-        if "visualizations" in message and message["visualizations"]:
-            existing_viz_ids.update(message["visualizations"])
-
-    # Fallback: Check for recently created visualization files (within last 30 seconds)
-    # This handles cases where the agent doesn't include the exact ID text
-    # BUT exclude any visualizations already associated with previous messages
-    viz_dir = os.path.join(os.path.dirname(__file__), "visualizations")
-    if os.path.exists(viz_dir):
-        now = datetime.now().timestamp()
-        recent_files = []
-        for viz_file in glob.glob(os.path.join(viz_dir, "viz_*.json")):
-            file_age = now - os.path.getmtime(viz_file)
-            if file_age < 30:  # Created within last 30 seconds
-                viz_id = os.path.basename(viz_file).replace('.json', '')
-                # Only add if not already in response text AND not in previous messages
-                if viz_id not in viz_ids and viz_id not in existing_viz_ids:
-                    recent_files.append(viz_id)
-        viz_ids.extend(recent_files)
-
-    return list(set(viz_ids))
 
 
 # Sidebar
@@ -2016,12 +2026,15 @@ if submit_button and user_input:
         "content": user_input
     })
 
+    # Capture start time for visualization tracking
+    generation_start_time = datetime.now().timestamp()
+
     # Truncate conversation history to prevent context overflow
     truncate_conversation_history()
 
-    # Clean old visualizations from previous turn
-    clean_old_visualizations()
+    # Clear current visualizations (will be repopulated after extraction)
     st.session_state.current_visualizations = []
+
 
     # Determine mode via Router Agent (if Auto-Routing is on)
     if "auto_routing" not in st.session_state:
@@ -2164,9 +2177,28 @@ if submit_button and user_input:
                 "visualizations": []
             })
         else:
-            # Extract visualization IDs from response
-            viz_ids = extract_visualization_ids(response)
+            # Extract visualization IDs from response using the start time
+            viz_ids = extract_visualization_ids(response, start_time=generation_start_time)
             st.session_state.current_visualizations = viz_ids
+
+            # Clean up old visualization files created before this query
+            viz_dir = os.path.join(os.path.dirname(__file__), "visualizations")
+            if os.path.exists(viz_dir):
+                for viz_file in glob.glob(os.path.join(viz_dir, "viz_*.json")):
+                    try:
+                        mtime = os.path.getmtime(viz_file)
+                        # Delete files created BEFORE this query started
+                        if mtime < generation_start_time:
+                            viz_id = os.path.basename(viz_file).replace('.json', '')
+                            # Only delete if not referenced in conversation history
+                            is_referenced = any(
+                                viz_id in msg.get("visualizations", [])
+                                for msg in st.session_state.messages
+                            )
+                            if not is_referenced:
+                                os.remove(viz_file)
+                    except (OSError, Exception):
+                        continue
 
             # Add assistant message
             st.session_state.messages.append({
@@ -2174,6 +2206,7 @@ if submit_button and user_input:
                 "content": response,
                 "visualizations": viz_ids
             })
+
 
     except Exception as e:
         st.error(f"Error during analysis: {str(e)}")
@@ -2188,4 +2221,5 @@ if submit_button and user_input:
 
     # Rerun to display new messages
     st.rerun()
+
 

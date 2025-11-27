@@ -9,6 +9,7 @@ langchain-core<1.0.0
 # Data processing
 pandas>=2.0.0
 numpy>=1.24.0
+scikit-learn>=1.4.0
 
 # Visualization
 plotly>=5.18.0
